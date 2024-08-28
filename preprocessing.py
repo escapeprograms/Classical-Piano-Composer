@@ -6,8 +6,8 @@ from torch import nn
 import torch.nn.functional as F
 
 
-#assemble training data in a readable format 
-def prepare_sequences(notes, durations, n_vocab, d_vocab):
+#assemble training data in a space-efficient categorical format
+def prepare_sequences(notes, durations, n_vocab, d_vocab, device="cpu"):
     """ Prepare the sequences used by the Neural Network """
     sequence_length = 100
 
@@ -39,22 +39,32 @@ def prepare_sequences(notes, durations, n_vocab, d_vocab):
         durations_input.append([duration_to_int[dur] for dur in durations_sequence_in])
         durations_output.append(duration_to_int[durations_sequence_out])
 
+    #number of examples
     n_patterns = len(notes_input)
 
     # reshape the input into a format compatible with LSTM layers
-    notes_input = np.reshape(notes_input, (n_patterns, sequence_length, 1))
-    # normalize input
-    notes_input = notes_input / float(n_vocab)
+    notes_input = torch.tensor(notes_input)
+    notes_output = torch.tensor(notes_output)
 
-    notes_output = F.one_hot(torch.tensor(notes_output)) #one hot encoding
+    durations_input = torch.tensor(durations_input)
+    durations_output = torch.tensor(durations_output)
 
-    durations_input = np.reshape(durations_input, (n_patterns, sequence_length, 1))
-    # normalize input
-    durations_input = durations_input / float(d_vocab)
+    network_input = torch.stack((notes_input, durations_input), dim=2) #TODO: stack notes_input and durations_input
+    network_output = torch.stack((notes_output, durations_output), dim= 1)
 
-    durations_output = F.one_hot(torch.tensor(durations_output))
+    return (network_input.long(), network_output.long())
 
-    network_input = np.concatenate((notes_input, durations_input), axis=2) #TODO: stack notes_input and durations_input
-    network_output = torch.cat((notes_output, durations_output), dim=1)
 
-    return (network_input, network_output)
+
+
+#apply one-hot encoding to the categorical data generated above
+def encode_data(network_data, n_vocab, d_vocab, device="cpu", type="input"):
+    if type == "input":
+        notes_input = F.one_hot(network_data[:, :, 0], num_classes=n_vocab)
+        durations_input = F.one_hot(network_data[:, :, 1], num_classes=d_vocab)
+        network_data = torch.cat((notes_input, durations_input), dim=2).to(device, dtype=torch.float32)
+    else: #type == output
+        notes_output = F.one_hot(network_data[:, 0], num_classes=n_vocab)
+        durations_output = F.one_hot(network_data[:, 1], num_classes=d_vocab)
+        network_data = torch.cat((notes_output, durations_output), dim=1).to(device, dtype=torch.float32)
+    return network_data
