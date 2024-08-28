@@ -36,6 +36,24 @@ class MusicLSTM(nn.Module):
         out = self.lin(out)
         return out
 
+class MusicLSTM2(nn.Module):
+    def __init__(self, input_len, hidden_size, num_note_classes, num_duration_classes, num_layers):
+        super(MusicLSTM2, self).__init__()
+        self.input_len = input_len #currently unused, but the "input_len" is self.num_note_classes + self.num_duration_classes
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.num_note_classes = num_note_classes
+        self.num_duration_classes = num_duration_classes
+
+        self.lstm = nn.LSTM(self.num_note_classes + self.num_duration_classes, hidden_size, num_layers, dropout= 0.3, batch_first=True)
+        self.lin = nn.Linear(hidden_size, self.num_note_classes + self.num_duration_classes)
+    
+    def forward(self, X):
+        _, (hidden, cell) = self.lstm(X)
+        out = hidden[-1] #just take the final LSTM layer
+        out = self.lin(out)
+        return out
+
 
 #First Model, only accounts for pitch
 # class MusicLSTM(nn.Module):

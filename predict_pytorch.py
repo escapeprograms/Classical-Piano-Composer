@@ -5,13 +5,24 @@ from models import MusicLSTM
 
 import pickle
 import numpy as np
-from music21 import instrument, note, stream, chord
+from music21 import instrument, note, stream, chord, tempo
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from preprocessing import prepare_sequences
+from preprocessing import prepare_sequences, encode_data
+
+output_length = 100
+
+#load cuda device
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+    print(f"Using device: {device}")
+else:
+    print("CUDA is not available")
+    device = torch.device("cpu")
+
 
 
 def generate():
@@ -69,23 +80,27 @@ def generate_notes(model, network_input, pitch_names, note_lengths, n_vocab, d_v
     int_to_note = dict((number, note) for number, note in enumerate(pitch_names))
     int_to_duration = dict((number, length) for number, length in enumerate(note_lengths))
 
-    pattern = network_input[start]
+    #reshape the randomly chosen starter sequence to (batch size = 1, sequence length = shape[0], features = shape[1])
+    init_sequence = torch.reshape(network_input[start], (1, network_input[start].shape[0], network_input[start].shape[1]))
+    pattern = encode_data(init_sequence, n_vocab, d_vocab, device, type="input")
     prediction_output = []
-    # generate 500 notes
-    for note_index in range(500):
-        prediction_input = np.reshape(np.array(pattern, dtype=np.float32), (1, 2, pattern.shape[1], 1))
-        prediction = model(torch.tensor(prediction_input))
+    # generate some notes notes
+    for note_index in range(output_length):
 
+        prediction = model(pattern)
         note_index = torch.argmax(prediction[0, 0:n_vocab]).item()
         note = int_to_note[note_index]
         
-        duration_index = torch.argmax(prediction[0, n_vocab+1:]).item()
+        duration_index = torch.argmax(prediction[0, n_vocab:]).item()
         duration = int_to_duration[duration_index]
-        prediction_output.append((note, duration)) #todo: note length
+        prediction_output.append((note, duration))
+        #reshape the new note to (batch size = 1, sequence length = 1, features = shape[1])
+        new_pattern = torch.reshape(torch.tensor([note_index, duration_index]), (1, 1, network_input[start].shape[1]))
 
-
-        pattern = np.append(pattern, np.reshape(np.array([note_index, duration_index]), (2, 1, 1)), axis=1)
+        new_pattern = encode_data(new_pattern, n_vocab, d_vocab, device, type="input")
+        pattern = torch.cat((pattern, new_pattern), dim=1)
         pattern = pattern[:, 1:, :]
+
 
     return prediction_output
 
@@ -104,7 +119,7 @@ def create_midi(prediction_output):
             for current_note in notes_in_chord:
                 new_note = note.Note(int(current_note))
                 new_note.storedInstrument = instrument.Piano()
-                new_note.quarterLength = length
+                new_note.quarterLength = 0.5
                 notes.append(new_note)
             new_chord = chord.Chord(notes)
             new_chord.offset = offset
@@ -114,13 +129,15 @@ def create_midi(prediction_output):
             new_note = note.Note(pattern)
             new_note.offset = offset
             new_note.storedInstrument = instrument.Piano()
-            new_note.quarterLength = length
+            new_note.quarterLength = 0.5
             output_notes.append(new_note)
 
         # increase offset each iteration so that notes do not stack
         offset += length
 
+    
     midi_stream = stream.Stream(output_notes)
+    midi_stream.append(tempo.MetronomeMark(number=120, beatUnit='quarter'))
 
     midi_stream.write('midi', fp='test_output.mid')
 
