@@ -13,7 +13,9 @@ import torch.nn.functional as F
 
 from preprocessing import prepare_sequences, encode_data
 
-output_length = 100
+from tqdm import tqdm
+
+output_length = 200
 
 #load cuda device
 if torch.cuda.is_available():
@@ -39,6 +41,7 @@ def generate():
     n_vocab = len(set(notes))
     d_vocab = len(set(durations))
 
+    print("Preparing sequence data...")
     network_input, _ = prepare_sequences(notes, durations, n_vocab, d_vocab)
 
     model = torch.load("models/music_model.pt")
@@ -85,7 +88,7 @@ def generate_notes(model, network_input, pitch_names, note_lengths, n_vocab, d_v
     pattern = encode_data(init_sequence, n_vocab, d_vocab, device, type="input")
     prediction_output = []
     # generate some notes notes
-    for note_index in range(output_length):
+    for note_index in tqdm(range(output_length), desc="generating song"):
 
         prediction = model(pattern)
         note_index = torch.argmax(prediction[0, 0:n_vocab]).item()
@@ -119,7 +122,7 @@ def create_midi(prediction_output):
             for current_note in notes_in_chord:
                 new_note = note.Note(int(current_note))
                 new_note.storedInstrument = instrument.Piano()
-                new_note.quarterLength = 0.5
+                new_note.quarterLength = length
                 notes.append(new_note)
             new_chord = chord.Chord(notes)
             new_chord.offset = offset
@@ -129,7 +132,7 @@ def create_midi(prediction_output):
             new_note = note.Note(pattern)
             new_note.offset = offset
             new_note.storedInstrument = instrument.Piano()
-            new_note.quarterLength = 0.5
+            new_note.quarterLength = length
             output_notes.append(new_note)
 
         # increase offset each iteration so that notes do not stack
@@ -140,6 +143,7 @@ def create_midi(prediction_output):
     midi_stream.append(tempo.MetronomeMark(number=120, beatUnit='quarter'))
 
     midi_stream.write('midi', fp='test_output.mid')
+    print("Done! Check test_output.mid")
 
 
 
