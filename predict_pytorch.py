@@ -15,7 +15,7 @@ from preprocessing import prepare_sequences, encode_data
 
 from tqdm import tqdm
 
-output_length = 200
+output_length = 200 #set how many notes to generate
 
 #load cuda device
 if torch.cuda.is_available():
@@ -42,63 +42,39 @@ def generate():
     d_vocab = len(set(durations))
 
     print("Preparing sequence data...")
-    network_input, _ = prepare_sequences(notes, durations, n_vocab, d_vocab)
+    start = np.random.randint(0, len(notes)-output_length-1)
+    network_input, _ = prepare_sequences(notes[start: start+output_length], durations, n_vocab, d_vocab)
 
     model = torch.load("models/music_model.pt")
     model.eval()
 
-    prediction_output = generate_notes(model, network_input, pitch_names, note_lengths, n_vocab, d_vocab)
+    prediction_output = generate_notes(model, network_input[0], pitch_names, note_lengths, n_vocab, d_vocab)
     create_midi(prediction_output)
 
 
-# def prepare_sequences(notes, pitchnames, n_vocab):
-#     """ Prepare the sequences used by the Neural Network """
-#     # map between notes and integers and back
-#     note_to_int = dict((note, number) for number, note in enumerate(pitchnames))
-
-#     sequence_length = 100
-#     network_input = []
-#     output = []
-#     for i in range(0, len(notes) - sequence_length, 1):
-#         sequence_in = notes[i:i + sequence_length]
-#         sequence_out = notes[i + sequence_length]
-#         network_input.append([note_to_int[char] for char in sequence_in])
-#         output.append(note_to_int[sequence_out])
-
-#     n_patterns = len(network_input)
-
-#     # reshape the input into a format compatible with LSTM layers
-#     normalized_input = np.reshape(network_input, (n_patterns, sequence_length, 1))
-#     # normalize input
-#     normalized_input = normalized_input / float(n_vocab)
-
-#     return (network_input, normalized_input)
-
-
-def generate_notes(model, network_input, pitch_names, note_lengths, n_vocab, d_vocab):
+def generate_notes(model, initial_sequence, pitch_names, note_lengths, n_vocab, d_vocab):
     """ Generate notes from the neural network based on a sequence of notes """
     # pick a random sequence from the input as a starting point for the prediction
-    start = np.random.randint(0, len(network_input)-1)
 
     int_to_note = dict((number, note) for number, note in enumerate(pitch_names))
     int_to_duration = dict((number, length) for number, length in enumerate(note_lengths))
 
     #reshape the randomly chosen starter sequence to (batch size = 1, sequence length = shape[0], features = shape[1])
-    init_sequence = torch.reshape(network_input[start], (1, network_input[start].shape[0], network_input[start].shape[1]))
+    init_sequence = torch.reshape(initial_sequence, (1, initial_sequence.shape[0], initial_sequence.shape[1]))
     pattern = encode_data(init_sequence, n_vocab, d_vocab, device, type="input")
     prediction_output = []
     # generate some notes notes
     for note_index in tqdm(range(output_length), desc="generating song"):
 
         prediction = model(pattern)
-        note_index = torch.argmax(prediction[0, 0:n_vocab]).item()
+        note_index = torch.multinomial(F.softmax(prediction[0, 0:n_vocab], dim=0), 1).item() #picks a note from a distribution instead of just the most probable note
         note = int_to_note[note_index]
         
         duration_index = torch.argmax(prediction[0, n_vocab:]).item()
         duration = int_to_duration[duration_index]
         prediction_output.append((note, duration))
         #reshape the new note to (batch size = 1, sequence length = 1, features = shape[1])
-        new_pattern = torch.reshape(torch.tensor([note_index, duration_index]), (1, 1, network_input[start].shape[1]))
+        new_pattern = torch.reshape(torch.tensor([note_index, duration_index]), (1, 1, initial_sequence.shape[1]))
 
         new_pattern = encode_data(new_pattern, n_vocab, d_vocab, device, type="input")
         pattern = torch.cat((pattern, new_pattern), dim=1)
